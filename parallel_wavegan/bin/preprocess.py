@@ -21,47 +21,7 @@ from parallel_wavegan.datasets import AudioDataset
 from parallel_wavegan.datasets import AudioSCPDataset
 from parallel_wavegan.utils import write_hdf5
 
-
-def logmelfilterbank(audio,
-                     sampling_rate,
-                     fft_size=1024,
-                     hop_size=256,
-                     win_length=None,
-                     window="hann",
-                     num_mels=80,
-                     fmin=None,
-                     fmax=None,
-                     eps=1e-10,
-                     ):
-    """Compute log-Mel filterbank feature.
-
-    Args:
-        audio (ndarray): Audio signal (T,).
-        sampling_rate (int): Sampling rate.
-        fft_size (int): FFT size.
-        hop_size (int): Hop size.
-        win_length (int): Window length. If set to None, it will be the same as fft_size.
-        window (str): Window function type.
-        num_mels (int): Number of mel basis.
-        fmin (int): Minimum frequency in mel basis calculation.
-        fmax (int): Maximum frequency in mel basis calculation.
-        eps (float): Epsilon value to avoid inf in log calculation.
-
-    Returns:
-        ndarray: Log Mel filterbank feature (#frames, num_mels).
-
-    """
-    # get amplitude spectrogram
-    x_stft = librosa.stft(audio, n_fft=fft_size, hop_length=hop_size,
-                          win_length=win_length, window=window, pad_mode="reflect")
-    spc = np.abs(x_stft).T  # (#frames, #bins)
-
-    # get mel basis
-    fmin = 0 if fmin is None else fmin
-    fmax = sampling_rate / 2 if fmax is None else fmax
-    mel_basis = librosa.filters.mel(sampling_rate, fft_size, num_mels, fmin, fmax)
-
-    return np.log10(np.maximum(eps, np.dot(spc, mel_basis.T)))
+from TTS.utils.audio import AudioProcessor
 
 
 def main():
@@ -99,6 +59,8 @@ def main():
         config = yaml.load(f, Loader=yaml.Loader)
     config.update(vars(args))
 
+    ap = AudioProcessor(**config['audio'])
+
     # check arguments
     if (args.wav_scp is not None and args.rootdir is not None) or \
             (args.wav_scp is None and args.rootdir is None):
@@ -130,11 +92,11 @@ def main():
             f"{utt_id} seems to be multi-channel signal."
         assert np.abs(audio).max() <= 1.0, \
             f"{utt_id} seems to be different from 16 bit PCM."
-        assert fs == config["sampling_rate"], \
+        assert fs == config['audio']['sample_rate'], \
             f"{utt_id} seems to have a different sampling rate."
 
         # trim silence
-        if config["trim_silence"]:
+        if config['audio']['do_trim_silence']:
             audio, _ = librosa.effects.trim(audio,
                                             top_db=config["trim_threshold_in_db"],
                                             frame_length=config["trim_frame_size"],
@@ -142,37 +104,29 @@ def main():
 
         if "sampling_rate_for_feats" not in config:
             x = audio
-            sampling_rate = config["sampling_rate"]
-            hop_size = config["hop_size"]
+            sampling_rate = config['audio']['sample_rate']
+            hop_size = config['audio']['hop_length']
         else:
             # NOTE(kan-bayashi): this procedure enables to train the model with different
             #   sampling rate for feature and audio, e.g., training with mel extracted
             #   using 16 kHz audio and 24 kHz audio as a target waveform
             x = librosa.resample(audio, fs, config["sampling_rate_for_feats"])
             sampling_rate = config["sampling_rate_for_feats"]
-            assert config["hop_size"] * config["sampling_rate_for_feats"] % fs == 0, \
+            assert config['audio']['hop_length'] * config["sampling_rate_for_feats"] % fs == 0, \
                 "hop_size must be int value. please check sampling_rate_for_feats is correct."
-            hop_size = config["hop_size"] * config["sampling_rate_for_feats"] // fs
+            hop_size = config['audio']['hop_length'] * config["sampling_rate_for_feats"] // fs
 
         # extract feature
-        mel = logmelfilterbank(x,
-                               sampling_rate=sampling_rate,
-                               hop_size=hop_size,
-                               fft_size=config["fft_size"],
-                               win_length=config["win_length"],
-                               window=config["window"],
-                               num_mels=config["num_mels"],
-                               fmin=config["fmin"],
-                               fmax=config["fmax"])
+        mel = ap.melspectrogram(audio).T
 
         # make sure the audio length and feature length are matched
-        audio = np.pad(audio, (0, config["fft_size"]), mode="edge")
-        audio = audio[:len(mel) * config["hop_size"]]
-        assert len(mel) * config["hop_size"] == len(audio)
+        audio = np.pad(audio, (0, ap.n_fft), mode="edge")
+        audio = audio[:len(mel) * config['audio']['hop_length']]
+        assert len(mel) * config['audio']['hop_length'] == len(audio)
 
         # apply global gain
-        if config["global_gain_scale"] > 0.0:
-            audio *= config["global_gain_scale"]
+        # if config["global_gain_scale"] > 0.0:
+        #     audio *= config["global_gain_scale"]
         if np.abs(audio).max() >= 1.0:
             logging.warn(f"{utt_id} causes clipping. "
                          f"it is better to re-consider global gain scale.")
