@@ -125,7 +125,7 @@ def main():
             # setup input
             x = ()
             if use_noise_input:
-                z = torch.randn(1, 1, len(c) * config["hop_size"]).to(device)
+                z = torch.randn(1, 1, len(c) * config["audio"]["hop_length"]).to(device)
                 x += (z,)
             c = pad_fn(torch.from_numpy(c).unsqueeze(0).transpose(2, 1)).to(device)
             x += (c,)
@@ -133,13 +133,13 @@ def main():
             # generate
             start = time.time()
             y = model(*x).view(-1).cpu().numpy()
-            rtf = (time.time() - start) / (len(y) / config["sampling_rate"])
+            rtf = (time.time() - start) / (len(y) / config["audio"]["sample_rate"])
             pbar.set_postfix({"RTF": rtf})
             total_rtf += rtf
 
             # save as PCM 16 bit wav file
             sf.write(os.path.join(config["outdir"], f"{utt_id}_gen.wav"),
-                     y, config["sampling_rate"], "PCM_16")
+                     y, config["audio"]["sample_rate"], "PCM_16")
 
     # report average RTF
     logging.info(f"Finished generation of {idx} utterances (RTF = {total_rtf / idx:.03f}).")
