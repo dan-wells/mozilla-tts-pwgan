@@ -434,7 +434,7 @@ class Trainer(object):
             plt.tight_layout()
             plt.savefig(figname)
             plt.close()
-            self.writer.add_figure('speech comparison', fig_wave, self.steps )
+            self.writer.add_figure('speech_comparison', fig_wave, self.steps )
 
             # plot spectrogram and save it
             if self.ap is not None:
